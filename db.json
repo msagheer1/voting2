@@ -1,0 +1,105 @@
+{
+  "polls": [
+    {
+      "id": "poll_1",
+      "question": "Which protocol works at the Transport Layer?",
+      "options": [
+        "HTTP",
+        "IP",
+        "TCP",
+        "DNS"
+      ],
+      "votes": [
+        12,
+        8,
+        25,
+        4
+      ],
+      "status": "closed",
+      "createdAt": 1781501740433,
+      "correctOptionIndex": 2
+    },
+    {
+      "id": "poll_2",
+      "question": "Which feature should we build next for our workspace?",
+      "options": [
+        "Dark Mode Theme",
+        "Keyboard Shortcuts",
+        "AI Chat Integration",
+        "Export to PDF"
+      ],
+      "votes": [
+        16,
+        9,
+        30,
+        4
+      ],
+      "status": "closed",
+      "createdAt": 1781588140433,
+      "correctOptionIndex": 0
+    },
+    {
+      "id": "poll_3",
+      "question": "Where should we host the upcoming company retreat?",
+      "options": [
+        "Mountain Resort",
+        "Beachside Hotel",
+        "Country Ranch",
+        "Staycation / City Centre"
+      ],
+      "votes": [
+        5,
+        24,
+        9,
+        12
+      ],
+      "status": "closed",
+      "createdAt": 1781674540433,
+      "correctOptionIndex": 1
+    }
+  ],
+  "votesRecords": [
+    {
+      "pollId": "poll_1",
+      "voterName": "John Doe",
+      "voterMobile": "9876543210",
+      "optionIndex": 2,
+      "votedAt": 1781544940433
+    },
+    {
+      "pollId": "poll_1",
+      "voterName": "Jane Smith",
+      "voterMobile": "8888888888",
+      "optionIndex": 2,
+      "votedAt": 1781553580433
+    },
+    {
+      "pollId": "poll_1",
+      "voterName": "Bob Johnson",
+      "voterMobile": "7777777777",
+      "optionIndex": 0,
+      "votedAt": 1781562220433
+    },
+    {
+      "pollId": "poll_2",
+      "voterName": "John Doe",
+      "voterMobile": "9876543210",
+      "optionIndex": 2,
+      "votedAt": 1781631340433
+    },
+    {
+      "pollId": "poll_2",
+      "voterName": "Alice Test",
+      "voterMobile": "1112223333",
+      "optionIndex": 0,
+      "votedAt": 1781760940473
+    },
+    {
+      "pollId": "poll_2",
+      "voterName": "Bob Test",
+      "voterMobile": "4445556666",
+      "optionIndex": 1,
+      "votedAt": 1781760940477
+    }
+  ]
+}
