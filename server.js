@@ -7,7 +7,13 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Initialize Supabase Client
-const supabaseUrl = process.env.SUPABASE_URL;
+let supabaseUrl = process.env.SUPABASE_URL;
+if (supabaseUrl && supabaseUrl.endsWith('/rest/v1/')) {
+  supabaseUrl = supabaseUrl.replace('/rest/v1/', '');
+}
+if (supabaseUrl && supabaseUrl.endsWith('/')) {
+  supabaseUrl = supabaseUrl.slice(0, -1);
+}
 const supabaseKey = process.env.SUPABASE_KEY;
 
 if (!supabaseUrl || !supabaseKey || supabaseUrl.includes('your-project-id')) {
@@ -100,7 +106,9 @@ const computeScoresAndLeaderboard = (polls, votesRecords, targetName, targetMobi
       scoresMap[key] = {
         name: record.voter_name.trim(),
         mobile: record.voter_mobile.trim(),
-        score: 0
+        score: 0,
+        correctCount: 0,
+        wrongCount: 0
       };
     }
 
@@ -109,25 +117,30 @@ const computeScoresAndLeaderboard = (polls, votesRecords, targetName, targetMobi
     if (poll && poll.status === 'closed' && poll.correct_option_index !== null && poll.correct_option_index !== undefined && poll.correct_option_index !== -1) {
       if (record.option_index === poll.correct_option_index) {
         scoresMap[key].score += 3;
+        scoresMap[key].correctCount += 1;
       } else {
         scoresMap[key].score -= 1;
+        scoresMap[key].wrongCount += 1;
       }
     }
   });
 
   // Calculate target user score
   let targetUserScore = 0;
+  let targetUserCorrect = 0;
+  let targetUserWrong = 0;
   if (targetName && targetMobile) {
     const targetKey = `${targetName.trim().toLowerCase()}_${targetMobile.trim()}`;
     if (scoresMap[targetKey]) {
       targetUserScore = scoresMap[targetKey].score;
+      targetUserCorrect = scoresMap[targetKey].correctCount;
+      targetUserWrong = scoresMap[targetKey].wrongCount;
     }
   }
 
-  // Compile and format leaderboard (top 5)
+  // Compile and format leaderboard (all voters)
   const leaderboardList = Object.values(scoresMap)
     .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
-    .slice(0, 5)
     .map(v => {
       const cleanMobile = v.mobile;
       const masked = cleanMobile.length >= 4 
@@ -136,11 +149,13 @@ const computeScoresAndLeaderboard = (polls, votesRecords, targetName, targetMobi
       return {
         name: v.name,
         mobileMasked: masked,
-        score: v.score
+        score: v.score,
+        correctCount: v.correctCount,
+        wrongCount: v.wrongCount
       };
     });
 
-  return { targetUserScore, leaderboardList };
+  return { targetUserScore, targetUserCorrect, targetUserWrong, leaderboardList };
 };
 
 // API Routes
@@ -178,13 +193,15 @@ app.post('/api/login', async (req, res) => {
     if (vErr) throw vErr;
 
     // Calculate score for this voter on login
-    const { targetUserScore } = computeScoresAndLeaderboard(polls, votesRecords, cleanName, cleanMobile);
+    const { targetUserScore, targetUserCorrect, targetUserWrong } = computeScoresAndLeaderboard(polls, votesRecords, cleanName, cleanMobile);
 
     return res.json({
       role: 'voter',
       name: cleanName,
       mobile: cleanMobile,
-      score: targetUserScore
+      score: targetUserScore,
+      correctCount: targetUserCorrect,
+      wrongCount: targetUserWrong
     });
   } catch (error) {
     console.error("Login Error:", error);
@@ -211,7 +228,7 @@ app.get('/api/polls', async (req, res) => {
     if (vErr) throw vErr;
 
     // Compute leaderboard and user score
-    const { targetUserScore, leaderboardList } = computeScoresAndLeaderboard(polls, votesRecords, name, mobile);
+    const { targetUserScore, targetUserCorrect, targetUserWrong, leaderboardList } = computeScoresAndLeaderboard(polls, votesRecords, name, mobile);
 
     // Map polls to customize data visibility
     const processedPolls = polls.map(poll => {
@@ -224,6 +241,7 @@ app.get('/api/polls', async (req, res) => {
 
       const hasVoted = !!voteRecord;
       const isClosed = poll.status === 'closed';
+      const isFrozen = poll.status === 'frozen';
 
       // Output poll format
       const outputPoll = {
@@ -237,15 +255,27 @@ app.get('/api/polls', async (req, res) => {
       };
 
       // Voters can see percentages ONLY if they have voted, OR if the poll is closed, OR if they are Admin.
-      if (isUserAdmin || hasVoted || isClosed) {
+      // Assuming frozen also shows results to voters without revealing correct answer.
+      if (isUserAdmin || hasVoted || isClosed || isFrozen) {
         outputPoll.votes = poll.votes;
         outputPoll.totalVotes = poll.votes.reduce((a, b) => a + b, 0);
       } else {
         outputPoll.votes = null; 
         outputPoll.totalVotes = null;
       }
+      
+      // Admin sees who voted for what
+      if (isUserAdmin) {
+        const optionVoters = Array(poll.options.length).fill().map(() => []);
+        votesRecords.forEach(r => {
+          if (r.poll_id === poll.id && r.option_index >= 0 && r.option_index < optionVoters.length) {
+            optionVoters[r.option_index].push(r.voter_name);
+          }
+        });
+        outputPoll.optionVoters = optionVoters;
+      }
 
-      // Hide correct answer on active polls
+      // Hide correct answer on active/frozen polls
       if (isClosed) {
         outputPoll.correctOptionIndex = poll.correct_option_index;
       } else {
@@ -259,6 +289,8 @@ app.get('/api/polls', async (req, res) => {
       polls: processedPolls, 
       isAdmin: isUserAdmin, 
       score: targetUserScore, 
+      correctCount: targetUserCorrect,
+      wrongCount: targetUserWrong,
       leaderboard: leaderboardList 
     });
   } catch (error) {
@@ -304,7 +336,7 @@ app.post('/api/polls/:id/vote', async (req, res) => {
     }
 
     if (poll.status !== 'active') {
-      return res.status(400).json({ error: "This poll has been closed." });
+      return res.status(400).json({ error: "This poll is not currently active for voting." });
     }
 
     const optIdx = parseInt(optionIndex, 10);
@@ -336,7 +368,7 @@ app.post('/api/polls/:id/vote', async (req, res) => {
     const { data: votesRecords, error: avErr } = await supabase.from('votes_records').select('*');
     if (avErr) throw avErr;
 
-    const { targetUserScore, leaderboardList } = computeScoresAndLeaderboard(allPolls, votesRecords, name, mobile);
+    const { targetUserScore, targetUserCorrect, targetUserWrong, leaderboardList } = computeScoresAndLeaderboard(allPolls, votesRecords, name, mobile);
 
     const totalVotes = updatedVotes.reduce((a, b) => a + b, 0);
 
@@ -355,6 +387,8 @@ app.post('/api/polls/:id/vote', async (req, res) => {
         correctOptionIndex: null // Active, so correct index masked
       },
       score: targetUserScore,
+      correctCount: targetUserCorrect,
+      wrongCount: targetUserWrong,
       leaderboard: leaderboardList
     });
   } catch (error) {
@@ -398,6 +432,30 @@ app.post('/api/polls', async (req, res) => {
   } catch (error) {
     console.error("Create Poll Error:", error);
     res.status(500).json({ error: "Failed to create poll. " + error.message });
+  }
+});
+
+// 4a. Freeze a Poll (Admin only)
+app.post('/api/polls/:id/freeze', async (req, res) => {
+  const { adminName, adminMobile } = req.body;
+  const { id } = req.params;
+
+  if (!isAdmin(adminName, adminMobile)) {
+    return res.status(403).json({ error: "Access denied." });
+  }
+
+  try {
+    const { error } = await supabase
+      .from('polls')
+      .update({ status: 'frozen' })
+      .eq('id', id);
+      
+    if (error) throw error;
+
+    res.json({ message: "Poll frozen successfully!" });
+  } catch (error) {
+    console.error("Freeze Poll Error:", error);
+    res.status(500).json({ error: "Failed to freeze poll. " + error.message });
   }
 });
 

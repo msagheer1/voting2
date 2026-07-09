@@ -141,6 +141,14 @@ function updateUserHeaderUI() {
       profileCardScore.textContent = formattedScore;
       profileCardScore.className = `score-badge ${currentUser.score < 0 ? 'negative' : ''}`;
     }
+    const profileCorrect = document.getElementById('profile-card-correct');
+    if (profileCorrect && currentUser.correctCount !== undefined) {
+      profileCorrect.textContent = currentUser.correctCount;
+    }
+    const profileWrong = document.getElementById('profile-card-wrong');
+    if (profileWrong && currentUser.wrongCount !== undefined) {
+      profileWrong.textContent = currentUser.wrongCount;
+    }
   }
 }
 
@@ -161,6 +169,8 @@ async function loadPolls() {
     // Update current user score from response
     if (currentUser.role !== 'admin') {
       currentUser.score = data.score;
+      currentUser.correctCount = data.correctCount;
+      currentUser.wrongCount = data.wrongCount;
       localStorage.setItem('pollify_user', JSON.stringify(currentUser));
       updateUserHeaderUI();
     }
@@ -194,6 +204,7 @@ function renderLeaderboard(leaderboard) {
   leaderboard.forEach((voter, index) => {
     const item = document.createElement('div');
     item.className = 'leaderboard-item';
+    item.style.animationDelay = `${index * 0.05}s`;
     
     const scoreText = (voter.score >= 0 ? '+' : '') + voter.score;
 
@@ -202,6 +213,10 @@ function renderLeaderboard(leaderboard) {
       <div class="leaderboard-info">
         <span class="leaderboard-name">${voter.name}</span>
         <span class="leaderboard-mobile">${voter.mobileMasked}</span>
+        <div style="display: flex; gap: 8px; font-size: 10px; margin-top: 2px;">
+          <span style="color: var(--success);">✔ ${voter.correctCount || 0}</span>
+          <span style="color: var(--error);">✖ ${voter.wrongCount || 0}</span>
+        </div>
       </div>
       <div class="leaderboard-score">${scoreText} pts</div>
     `;
@@ -240,6 +255,8 @@ async function castVote(pollId, optionIndex) {
 
     // Update score
     currentUser.score = data.score;
+    currentUser.correctCount = data.correctCount;
+    currentUser.wrongCount = data.wrongCount;
     localStorage.setItem('pollify_user', JSON.stringify(currentUser));
     updateUserHeaderUI();
 
@@ -289,8 +306,15 @@ function renderVoterPolls() {
     }
 
     // Header Status Tags
-    const statusText = poll.status === 'active' ? 'Active' : 'Closed';
-    const statusClass = poll.status === 'active' ? 'active' : 'closed';
+    let statusText = 'Active';
+    let statusClass = 'active';
+    if (poll.status === 'closed') {
+      statusText = 'Closed';
+      statusClass = 'closed';
+    } else if (poll.status === 'frozen') {
+      statusText = 'Frozen';
+      statusClass = 'frozen';
+    }
     
     // Total Votes Count
     let totalVotesText = '';
@@ -300,8 +324,8 @@ function renderVoterPolls() {
 
     let optionsHtml = '';
 
-    // If voter has voted OR if poll is closed (results view)
-    if (poll.hasVoted || poll.status === 'closed') {
+    // If voter has voted OR if poll is closed (results view) OR frozen
+    if (poll.hasVoted || poll.status === 'closed' || poll.status === 'frozen') {
       let maxVotes = -1;
       let winningIndex = -1;
       if (poll.votes) {
@@ -362,11 +386,19 @@ function renderVoterPolls() {
           </div>
         `;
       });
-    } else {
+    } else if (poll.status === 'active') {
       // Unvoted, active poll: Render interactive buttons
       poll.options.forEach((option, idx) => {
         optionsHtml += `
           <button class="option-btn" onclick="castVote('${poll.id}', ${idx})">
+            <span>${option}</span>
+          </button>
+        `;
+      });
+    } else if (poll.status === 'frozen') {
+      poll.options.forEach((option, idx) => {
+        optionsHtml += `
+          <button class="option-btn" disabled style="opacity: 0.6; cursor: not-allowed;">
             <span>${option}</span>
           </button>
         `;
@@ -416,8 +448,8 @@ function renderAdminPolls() {
     row.style.alignItems = 'stretch';
 
     const totalVotes = poll.totalVotes || 0;
-    const statusText = poll.status === 'active' ? 'Active' : 'Closed';
-    const statusClass = poll.status === 'active' ? 'active' : 'closed';
+    const statusText = poll.status === 'active' ? 'Active' : (poll.status === 'frozen' ? 'Frozen' : 'Closed');
+    const statusClass = poll.status === 'active' ? 'active' : (poll.status === 'frozen' ? 'frozen' : 'closed');
 
     let optionsTextSummary = poll.options.map((opt, idx) => {
       const votes = poll.votes ? poll.votes[idx] : 0;
@@ -425,8 +457,14 @@ function renderAdminPolls() {
       if (poll.status === 'closed' && poll.correctOptionIndex === idx) {
         suffix = ' ⭐ (Correct)';
       }
-      return `${opt} (${votes})${suffix}`;
-    }).join(', ');
+      
+      let votersStr = '';
+      if (poll.optionVoters && poll.optionVoters[idx] && poll.optionVoters[idx].length > 0) {
+        votersStr = `<div style="font-size: 11px; color: var(--primary); margin-left: 12px; line-height: 1.2;">Voters: ${poll.optionVoters[idx].join(', ')}</div>`;
+      }
+
+      return `<div style="margin-bottom: 4px;">• ${opt} (${votes})${suffix}${votersStr}</div>`;
+    }).join('');
 
     // Check if correct answer is set
     let correctAnsText = '';
@@ -444,7 +482,8 @@ function renderAdminPolls() {
         <div class="admin-poll-info">
           <h4 class="admin-poll-question">${poll.question}</h4>
           <div style="font-size: 13px; color: var(--color-text-secondary); margin-bottom: 8px;">
-            <strong>Options:</strong> ${optionsTextSummary}
+            <strong>Options:</strong>
+            <div style="margin-top: 4px;">${optionsTextSummary}</div>
           </div>
           <div class="admin-poll-meta">
             <span class="poll-status-tag ${statusClass}" style="margin: 0;">${statusText}</span>
@@ -455,7 +494,19 @@ function renderAdminPolls() {
         </div>
         <div class="admin-poll-actions">
           ${poll.status === 'active' ? `
+            <button class="btn btn-secondary btn-icon" onclick="freezePoll('${poll.id}')" title="Freeze Voting">
+              <svg viewBox="0 0 20 20" fill="currentColor" width="20" height="20">
+                <path d="M10 2a1 1 0 011 1v1.323l3.954 1.582 1.599-.8a1 1 0 01.894 1.79l-1.23.615 1.738 5.42a1 1 0 11-1.904.61L15.116 11.5l-4.116 1.646V17a1 1 0 11-2 0v-3.854l-4.116-1.646-1.127 3.518a1 1 0 01-1.904-.61l1.738-5.42-1.23-.615a1 1 0 01.894-1.79l1.599.8L9 3.323V3a1 1 0 011-1z"/>
+              </svg>
+            </button>
             <button class="btn btn-secondary btn-icon" onclick="setupClosePoll('${poll.id}')" title="Close Poll">
+              <svg viewBox="0 0 20 20" fill="currentColor" width="20" height="20">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clip-rule="evenodd" />
+              </svg>
+            </button>
+          ` : ''}
+          ${poll.status === 'frozen' ? `
+            <button class="btn btn-primary btn-icon" onclick="setupClosePoll('${poll.id}')" title="Close Poll & Score">
               <svg viewBox="0 0 20 20" fill="currentColor" width="20" height="20">
                 <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clip-rule="evenodd" />
               </svg>
@@ -606,6 +657,34 @@ async function deletePoll(pollId) {
     }
 
     showToast("Poll deleted successfully.");
+    loadPolls();
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
+}
+
+// Freeze Poll API call
+async function freezePoll(pollId) {
+  if (!confirm("Freeze this poll? Voters will not be able to change their answers, but the correct answer will not be revealed yet.")) return;
+
+  try {
+    const response = await fetch(`/api/polls/${pollId}/freeze`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        adminName: currentUser.name,
+        adminMobile: currentUser.mobile
+      })
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || 'Failed to freeze poll.');
+    }
+
+    showToast("Poll frozen successfully.");
     loadPolls();
   } catch (error) {
     showToast(error.message, 'error');
