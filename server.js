@@ -185,37 +185,12 @@ app.post('/api/login', async (req, res) => {
   }
 
   try {
-    // Fetch votes records to detect name/mobile conflicts
-    const { data: votesRecords, error: vErr } = await supabase.from('votes_records').select('voter_name, voter_mobile');
-    if (vErr) throw vErr;
-
-    const lowerName = cleanName.toLowerCase();
-
-    // Check 1: Same name, different mobile
-    const sameNameRecord = votesRecords.find(r =>
-      r.voter_name.trim().toLowerCase() === lowerName &&
-      r.voter_mobile.trim() !== cleanMobile
-    );
-    if (sameNameRecord) {
-      return res.status(409).json({
-        error: `The name "${cleanName}" is already registered under a different mobile number ending in ...${sameNameRecord.voter_mobile.trim().slice(-4)}. Please use the correct mobile number, or use a different name.`
-      });
-    }
-
-    // Check 2: Same mobile, different name
-    const sameMobileRecord = votesRecords.find(r =>
-      r.voter_mobile.trim() === cleanMobile &&
-      r.voter_name.trim().toLowerCase() !== lowerName
-    );
-    if (sameMobileRecord) {
-      return res.status(409).json({
-        error: `This mobile number is already registered under the name "${sameMobileRecord.voter_name.trim()}". Please use that name to log in.`
-      });
-    }
-
-    // Fetch polls to compute score
+    // Fetch polls & votes records from Supabase to compute score
     const { data: polls, error: pErr } = await supabase.from('polls').select('*');
     if (pErr) throw pErr;
+
+    const { data: votesRecords, error: vErr } = await supabase.from('votes_records').select('*');
+    if (vErr) throw vErr;
 
     // Calculate score for this voter on login
     const { targetUserScore, targetUserCorrect, targetUserWrong } = computeScoresAndLeaderboard(polls, votesRecords, cleanName, cleanMobile);
@@ -339,10 +314,10 @@ app.post('/api/polls/:id/vote', async (req, res) => {
   }
 
   try {
-    // Check if voter already voted on this exact poll (strict check)
+    // Check if voter already voted
     const { data: existingVote, error: evErr } = await supabase
       .from('votes_records')
-      .select('id, option_index')
+      .select('id')
       .eq('poll_id', id)
       .ilike('voter_name', name.trim())
       .eq('voter_mobile', mobile.trim())
@@ -350,10 +325,7 @@ app.post('/api/polls/:id/vote', async (req, res) => {
     
     if (evErr) throw evErr;
     if (existingVote && existingVote.length > 0) {
-      return res.status(400).json({ 
-        error: "You have already submitted your answer for this question. No duplicate votes are allowed.",
-        alreadyVoted: true
-      });
+      return res.status(400).json({ error: "You have already voted on this poll." });
     }
 
     // Get the poll
