@@ -225,7 +225,25 @@ function renderLeaderboard(leaderboard) {
   });
 }
 
+// Cast Vote
+async function castVote(pollId, optionIndex) {
+  try {
+    const response = await fetch(`/api/polls/${pollId}/vote`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        name: currentUser.name,
+        mobile: currentUser.mobile,
+        optionIndex: optionIndex
+      })
+    });
 
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || 'Failed to cast vote.');
+    }
 
     showToast("Vote cast successfully!");
     
